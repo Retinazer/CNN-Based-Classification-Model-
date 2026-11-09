@@ -1,0 +1,24 @@
+Using device: mps
+Classes (9): ['algal_spot', 'anthracnose', 'bird_eye_spot', 'brown_blight', 'gray_blight', 'healthy', 'helopeltis', 'red_spot', 'white_spot']
+
+Overall test accuracy: 0.9635
+
+Per-class precision/recall/F1:
+               precision    recall  f1-score   support
+
+   algal_spot       0.99      0.98      0.98       167
+  anthracnose       0.78      0.47      0.58        15
+bird_eye_spot       0.74      0.93      0.82        15
+ brown_blight       1.00      0.92      0.96       147
+  gray_blight       0.92      0.99      0.95       165
+      healthy       0.95      1.00      0.97       161
+   helopeltis       1.00      0.97      0.99       150
+     red_spot       0.99      0.97      0.98       172
+   white_spot       0.80      0.95      0.87        21
+
+     accuracy                           0.96      1013
+    macro avg       0.91      0.91      0.90      1013
+ weighted avg       0.97      0.96      0.96      1013
+
+Saved confusion matrix to /Users/empatherys/Desktop/Newest Secret Classification stuff, top secret dont share to anyone please../tea_cnn/confusion_matrix.png
+Saved sample predictions grid to /Users/empatherys/Desktop/Newest Secret Classification stuff, top secret dont share to anyone please../tea_cnn/sample_predictions.png

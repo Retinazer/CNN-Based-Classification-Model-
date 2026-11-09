@@ -1,0 +1,4 @@
+.DS_Store
+.claude/
+tea_cnn/data_cache/
+tea_cnn/__pycache__/
