@@ -1,18 +1,26 @@
 """
-FastAPI inference server for the trained tea-leaf disease classifier.
+FastAPI inference server for the trained tea-leaf disease classifier (TDD).
 
 Loads checkpoints/best_model.pt (MobileNetV2, 9 classes) and exposes:
-  POST /predict  - multipart image upload -> JSON {label, confidence, top3, advice}
+  POST /predict  - multipart image upload ->
+                   JSON {label, confidence, top3, severity, summary, action,
+                         heatmap (base64 PNG attention overlay), focus_region}
   GET  /health   - liveness check
   GET  /         - serves the mobile web app (mobile_app/index.html)
+
+The "heatmap"/"focus_region" fields come from a real Grad-CAM pass over the
+model's last conv block -- they show where the network actually weighted
+its decision, not a canned explanation. This is approximate evidence of
+*where* the model looked, not a verified clinical cause.
 
 Run:  python3 server.py
 Then open http://<this-machine's-LAN-IP>:8000 on your phone (same Wi-Fi).
 """
+import base64
 import io
-import json
 import os
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 import uvicorn
@@ -75,7 +83,7 @@ ADVICE = {
     },
 }
 
-app = FastAPI(title="Tea Leaf Health Scanner API")
+app = FastAPI(title="TDD - Tea Disease Detector API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -90,6 +98,99 @@ model = build_model(len(classes)).to(device)
 model.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
 print(f"Loaded model on {device}. Classes: {classes}")
+
+# --- Grad-CAM hooks on the last conv block of MobileNetV2's feature extractor ---
+_gradcam_target = model.features[-1]
+_activations = {}
+_gradients = {}
+
+
+def _forward_hook(module, inp, out):
+    _activations["value"] = out
+
+
+def _backward_hook(module, grad_in, grad_out):
+    _gradients["value"] = grad_out[0]
+
+
+_gradcam_target.register_forward_hook(_forward_hook)
+_gradcam_target.register_full_backward_hook(_backward_hook)
+
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+# simple blue -> green -> yellow -> red colormap, no extra dependency needed
+_CMAP_STOPS = np.array(
+    [
+        [68, 1, 84],
+        [59, 82, 139],
+        [33, 145, 140],
+        [94, 201, 98],
+        [253, 231, 37],
+    ],
+    dtype=np.float32,
+)
+
+
+def _colorize(gray01: np.ndarray) -> np.ndarray:
+    """gray01: HxW float array in [0,1] -> HxWx3 uint8 using a fixed colormap."""
+    n = len(_CMAP_STOPS) - 1
+    scaled = np.clip(gray01, 0, 1) * n
+    idx = np.clip(scaled.astype(int), 0, n - 1)
+    frac = (scaled - idx)[..., None]
+    c0 = _CMAP_STOPS[idx]
+    c1 = _CMAP_STOPS[np.clip(idx + 1, 0, n)]
+    return (c0 + (c1 - c0) * frac).astype(np.uint8)
+
+
+def _region_label(cy: float, cx: float) -> str:
+    """cy, cx in [0,1] -> a human-readable 3x3 grid location on the leaf."""
+    row = "top" if cy < 1 / 3 else ("bottom" if cy > 2 / 3 else "middle")
+    col = "left" if cx < 1 / 3 else ("right" if cx > 2 / 3 else "center")
+    if row == "middle" and col == "center":
+        return "center of the leaf"
+    return f"{row} {col}".replace("middle center", "center")
+
+
+def run_gradcam(tensor: torch.Tensor, class_idx: int, base_img: Image.Image):
+    """Returns (heatmap_data_uri, focus_region_label, coverage_fraction)."""
+    model.zero_grad(set_to_none=True)
+    tensor = tensor.clone().requires_grad_(True)
+    with torch.enable_grad():
+        logits = model(tensor)
+        score = logits[0, class_idx]
+        score.backward()
+
+    acts = _activations["value"][0]       # [C, h, w]
+    grads = _gradients["value"][0]        # [C, h, w]
+    weights = grads.mean(dim=(1, 2))      # [C]
+    cam = F.relu((weights[:, None, None] * acts).sum(dim=0))  # [h, w]
+    cam = cam / (cam.max() + 1e-8)
+    cam_np = cam.detach().cpu().numpy()
+
+    # focus region from the CAM's own (low-res) centroid, before upsampling
+    ys, xs = np.mgrid[0:cam_np.shape[0], 0:cam_np.shape[1]]
+    total = cam_np.sum() + 1e-8
+    cy = float((ys * cam_np).sum() / total) / max(cam_np.shape[0] - 1, 1)
+    cx = float((xs * cam_np).sum() / total) / max(cam_np.shape[1] - 1, 1)
+    coverage = float((cam_np > 0.5).sum()) / cam_np.size
+
+    # upsample CAM to image size and blend over the actual (resized) input image
+    cam_t = torch.tensor(cam_np)[None, None]
+    cam_up = F.interpolate(cam_t, size=(IMG_SIZE, IMG_SIZE), mode="bilinear", align_corners=False)[0, 0].numpy()
+    heat_rgb = _colorize(cam_up)
+
+    base_resized = base_img.resize((IMG_SIZE, IMG_SIZE)).convert("RGB")
+    base_np = np.array(base_resized).astype(np.float32)
+    alpha = np.clip(cam_up, 0.25, 0.85)[..., None]  # keep low-activation areas mostly original image
+    blended = (base_np * (1 - alpha) + heat_rgb.astype(np.float32) * alpha).astype(np.uint8)
+
+    out_img = Image.fromarray(blended)
+    buf = io.BytesIO()
+    out_img.save(buf, format="PNG")
+    data_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return data_uri, _region_label(cy, cx), round(coverage, 3)
 
 
 @app.get("/health")
@@ -108,10 +209,10 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Could not decode image.")
 
     tensor = eval_transform(image).unsqueeze(0).to(device)
+
     with torch.no_grad():
         logits = model(tensor)
         probs = F.softmax(logits, dim=1)[0]
-
     top_probs, top_idx = probs.topk(min(3, len(classes)))
     top3 = [
         {"label": classes[i], "confidence": round(p.item(), 4)}
@@ -119,7 +220,14 @@ async def predict(file: UploadFile = File(...)):
     ]
     best_label = top3[0]["label"]
     best_conf = top3[0]["confidence"]
+    best_idx = int(top_idx[0].item())
     info = ADVICE.get(best_label, {"severity": "unknown", "summary": "", "action": "Consult a tea agronomist."})
+
+    heatmap_uri, focus_region, coverage = None, None, None
+    try:
+        heatmap_uri, focus_region, coverage = run_gradcam(tensor, best_idx, image)
+    except Exception as e:
+        print(f"Grad-CAM failed (continuing without it): {e}")
 
     return {
         "label": best_label,
@@ -128,6 +236,9 @@ async def predict(file: UploadFile = File(...)):
         "severity": info["severity"],
         "summary": info["summary"],
         "action": info["action"],
+        "heatmap": heatmap_uri,
+        "focus_region": focus_region,
+        "focus_coverage": coverage,
     }
 
 
@@ -140,4 +251,5 @@ if os.path.isdir(APP_DIR):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

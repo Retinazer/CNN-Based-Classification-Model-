@@ -1,0 +1,10 @@
+# Minimal runtime deps for server.py only (no training/eval packages,
+# no datasets/pyarrow/matplotlib/scikit-learn) -- keeps the Render build
+# small and fast. Use alongside the CPU-only torch index (see render.yaml).
+torch==2.15.0
+torchvision==0.29.2
+pillow
+numpy
+fastapi
+uvicorn
+python-multipart

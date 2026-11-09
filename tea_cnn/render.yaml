@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: tdd-tea-disease-detector
+    runtime: python
+    plan: free
+    rootDir: tea_cnn
+    buildCommand: "pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements-server.txt"
+    startCommand: "python3 server.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
