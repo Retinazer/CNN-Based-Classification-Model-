@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tea Leaf Health Scanner</title>
+<style>
+  :root{
+    --bg:#f3f1e9; --surface:#ffffff; --ink:#1f271c; --muted:#767d6e;
+    --accent:#3f7d4e; --accent-soft:#e4efdf; --warn:#b5651d; --warn-soft:#f6e6d4;
+    --danger:#b5422f; --danger-soft:#f6ded9; --line:#e7e3d4; --chip:#f1efe3;
+    --shadow:0 10px 24px -14px rgba(31,39,28,.18), 0 2px 6px -2px rgba(31,39,28,.08);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    padding:env(safe-area-inset-top,0) max(16px,env(safe-area-inset-right,0)) 0 max(16px,env(safe-area-inset-left,0));
+  }
+  .scroll{max-width:480px; margin:0 auto; padding-bottom:96px;}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:18px 0 4px;}
+  .round-btn{width:42px; height:42px; border-radius:50%; background:var(--surface); box-shadow:var(--shadow); display:flex; align-items:center; justify-content:center; border:none; flex:none;}
+  .round-btn svg{width:18px; height:18px; stroke:var(--ink); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+
+  .hero{padding:14px 2px 18px; text-align:center;}
+  .hero h1{font-size:25px; font-weight:700; margin:0 0 4px; letter-spacing:-.01em;}
+  .hero p{margin:0; font-size:13.5px; color:var(--muted);}
+
+  .card{background:var(--surface); border-radius:22px; padding:16px; margin:14px 0; box-shadow:var(--shadow);}
+
+  /* server connection row */
+  .server-row{display:flex; gap:8px; align-items:center;}
+  .server-row input{flex:1; background:var(--chip); border:1px solid transparent; color:var(--ink); border-radius:12px; padding:11px 13px; font-size:13px; outline:none;}
+  .server-row input:focus{border-color:var(--accent);}
+  .server-row .check-btn{flex:none; border:none; background:var(--ink); color:#fff; border-radius:12px; padding:11px 16px; font-size:12.5px; font-weight:600; cursor:pointer;}
+  .conn-label{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--muted); margin-bottom:9px; text-transform:uppercase; letter-spacing:.06em; font-weight:600;}
+  .dot{width:8px; height:8px; border-radius:50%; background:#c7c2ad; flex:none; transition:background .2s;}
+  .dot.ok{background:var(--accent)}
+  .dot.bad{background:var(--danger)}
+
+  /* viewfinder */
+  .shot-wrap{
+    position:relative; width:100%; aspect-ratio:4/3; border-radius:18px; overflow:hidden;
+    background:linear-gradient(160deg,#eef3e8,#dce6d2);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .shot-wrap img{width:100%; height:100%; object-fit:cover; display:block;}
+  .bracket{position:absolute; width:26px; height:26px; border:2.5px solid rgba(63,125,78,.55); opacity:.9;}
+  .bracket.tl{top:14px; left:14px; border-right:none; border-bottom:none; border-top-left-radius:6px;}
+  .bracket.tr{top:14px; right:14px; border-left:none; border-bottom:none; border-top-right-radius:6px;}
+  .bracket.bl{bottom:14px; left:14px; border-right:none; border-top:none; border-bottom-left-radius:6px;}
+  .bracket.br{bottom:14px; right:14px; border-left:none; border-top:none; border-bottom-right-radius:6px;}
+  .placeholder{color:var(--muted); font-size:13px; text-align:center; padding:0 28px; position:relative; z-index:1;}
+  .leaf-icon{width:34px; height:34px; margin:0 auto 8px; opacity:.55;}
+
+  input[type=file]{display:none}
+  .caption{text-align:center; font-size:12.5px; color:var(--muted); margin-top:10px;}
+
+  .btn-row{display:flex; gap:10px; margin-top:14px;}
+  .circle-action{width:56px; height:56px; border-radius:50%; border:none; background:var(--chip); display:flex; align-items:center; justify-content:center; flex:none; cursor:pointer;}
+  .circle-action svg{width:22px; height:22px; stroke:var(--ink); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+  .btn{flex:1; border:none; border-radius:14px; padding:15px; font-size:14.5px; font-weight:700; cursor:pointer; text-align:center; transition:opacity .15s;}
+  .btn-primary{background:var(--accent); color:#fff;}
+  .btn-primary:disabled{opacity:.4; cursor:default;}
+  .status{font-size:12.5px; color:var(--muted); text-align:center; margin-top:10px; min-height:16px;}
+
+  /* result */
+  .result{display:none; flex-direction:column; gap:12px;}
+  .result.show{display:flex}
+  .result-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .badge{display:inline-flex; align-items:center; gap:6px; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:6px 11px; border-radius:20px; width:fit-content;}
+  .badge.none, .badge.low{background:var(--accent-soft); color:var(--accent);}
+  .badge.medium{background:var(--warn-soft); color:var(--warn);}
+  .badge.high{background:var(--danger-soft); color:var(--danger);}
+  .label-name{font-size:21px; font-weight:700; margin:2px 0 0; text-transform:capitalize; letter-spacing:-.01em;}
+
+  .match-row{display:flex; align-items:center; justify-content:space-between; font-size:12.5px; color:var(--muted); font-weight:600;}
+  .match-row b{color:var(--ink); font-size:13.5px;}
+  .conf-track{height:7px; background:var(--chip); border-radius:5px; overflow:hidden; margin-top:6px;}
+  .conf-fill{height:100%; background:var(--accent); border-radius:5px; width:0%; transition:width .5s ease;}
+
+  .info-block{background:var(--chip); border-radius:14px; padding:12px 14px; font-size:13.5px; line-height:1.55;}
+  .info-block b{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:5px; font-weight:700;}
+
+  .top3-title{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; margin:2px 0 8px;}
+  .top3{display:flex; flex-direction:column; gap:9px;}
+  .top3 .row{display:flex; flex-direction:column; gap:4px;}
+  .top3 .row .line{display:flex; justify-content:space-between; font-size:12.5px; text-transform:capitalize;}
+  .top3 .row .line b{font-weight:600; color:var(--ink);}
+  .top3 .row .line span{color:var(--muted);}
+  .top3-track{height:5px; background:var(--chip); border-radius:4px; overflow:hidden;}
+  .top3-fill{height:100%; background:#c7c2ad; border-radius:4px;}
+
+  footer{text-align:center; font-size:10.5px; color:var(--muted); padding:8px 0 18px;}
+
+  /* bottom tab bar, decorative */
+  .tabbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:10;
+    background:var(--surface); border-top:1px solid var(--line);
+    padding:10px max(16px, env(safe-area-inset-right,0)) calc(10px + env(safe-area-inset-bottom,0)) max(16px, env(safe-area-inset-left,0));
+    display:flex; justify-content:space-around;
+  }
+  .tab{display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--muted); font-size:10px; font-weight:600; background:none; border:none;}
+  .tab svg{width:21px; height:21px; stroke:var(--muted); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+  .tab.active{color:var(--accent);}
+  .tab.active svg{stroke:var(--accent);}
+</style>
+</head>
+<body>
+<div class="scroll">
+
+  <div class="topbar">
+    <button class="round-btn" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button class="round-btn" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+  </div>
+
+  <div class="hero">
+    <h1>Scan a Tea Leaf</h1>
+    <p>Get a disease diagnosis from the trained model</p>
+  </div>
+
+  <div class="card">
+    <div class="conn-label"><span class="dot" id="statusDot"></span>Server connection</div>
+    <div class="server-row">
+      <input id="serverUrl" type="text" placeholder="http://192.168.x.x:8000" />
+      <button class="check-btn" id="checkBtn">Check</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="shot-wrap" id="shotWrap">
+      <span class="placeholder" id="placeholder">
+        <svg class="leaf-icon" viewBox="0 0 24 24" fill="none" stroke="#3f7d4e" stroke-width="1.6"><path d="M12 2c5 1 9 5 9 10a9 9 0 0 1-9 9c-5-1-9-5-9-10a9 9 0 0 1 9-9z"/><path d="M12 3v18"/></svg>
+        No photo yet — take or choose one below
+      </span>
+      <img id="preview" style="display:none" alt="">
+      <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+    </div>
+    <div class="caption">Point your camera at a single leaf</div>
+
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+    <div class="btn-row">
+      <button class="circle-action" id="uploadBtn" aria-label="Choose from library">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+      </button>
+      <button class="btn btn-primary" id="captureBtn">Take Photo</button>
+    </div>
+    <button class="btn btn-primary" id="scanBtn" style="width:100%; margin-top:10px;" disabled>Scan Leaf</button>
+    <div class="status" id="statusText"></div>
+  </div>
+
+  <div class="card result" id="resultCard">
+    <div class="result-top">
+      <div>
+        <span class="badge" id="badge">—</span>
+        <h2 class="label-name" id="labelName">—</h2>
+      </div>
+    </div>
+
+    <div class="match-row"><span>Model confidence</span><b id="confNum">—</b></div>
+    <div class="conf-track"><div class="conf-fill" id="confFill"></div></div>
+
+    <div class="info-block"><b>Diagnosis</b><span id="summary">—</span></div>
+    <div class="info-block"><b>Recommended action</b><span id="action">—</span></div>
+    <div class="info-block">
+      <div class="top3-title">Other possibilities</div>
+      <div class="top3" id="top3"></div>
+    </div>
+  </div>
+
+  <footer>Inference runs on your trained model via the local server · demo for entrepreneurship proposal</footer>
+</div>
+
+<div class="tabbar" aria-hidden="true">
+  <button class="tab"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Home</button>
+  <button class="tab active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 3v4M16 3v4M3 9h18"/></svg>Scan</button>
+  <button class="tab"><svg viewBox="0 0 24 24"><path d="M4 4h16v16l-8-5-8 5z"/></svg>Log</button>
+  <button class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>Profile</button>
+</div>
+
+<script>
+(function(){
+  var fileInput=document.getElementById('fileInput');
+  var preview=document.getElementById('preview');
+  var placeholder=document.getElementById('placeholder');
+  var scanBtn=document.getElementById('scanBtn');
+  var statusText=document.getElementById('statusText');
+  var resultCard=document.getElementById('resultCard');
+  var serverUrlInput=document.getElementById('serverUrl');
+  var statusDot=document.getElementById('statusDot');
+  var selectedFile=null;
+
+  try{
+    var saved=localStorage.getItem('tea_scanner_server_url');
+    serverUrlInput.value = saved || (location.origin.indexOf('http')===0 ? location.origin : '');
+  }catch(e){ serverUrlInput.value = location.origin; }
+
+  function serverBase(){ return serverUrlInput.value.trim().replace(/\/$/,''); }
+
+  document.getElementById('captureBtn').addEventListener('click', function(){
+    fileInput.setAttribute('capture','environment');
+    fileInput.click();
+  });
+  document.getElementById('uploadBtn').addEventListener('click', function(){
+    fileInput.removeAttribute('capture');
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', function(){
+    var f=fileInput.files[0];
+    if(!f) return;
+    selectedFile=f;
+    var url=URL.createObjectURL(f);
+    preview.src=url;
+    preview.style.display='block';
+    placeholder.style.display='none';
+    scanBtn.disabled=false;
+    resultCard.classList.remove('show');
+    statusText.textContent='';
+  });
+
+  document.getElementById('checkBtn').addEventListener('click', checkHealth);
+
+  function checkHealth(){
+    var base=serverBase();
+    try{ localStorage.setItem('tea_scanner_server_url', base); }catch(e){}
+    if(!base){ statusDot.className='dot bad'; return; }
+    statusDot.className='dot';
+    fetch(base+'/health').then(function(r){ return r.json(); }).then(function(d){
+      statusDot.className='dot ok';
+      statusText.textContent='Connected · '+d.classes.length+' classes · running on '+d.device;
+    }).catch(function(){
+      statusDot.className='dot bad';
+      statusText.textContent='Could not reach server at that address.';
+    });
+  }
+
+  scanBtn.addEventListener('click', function(){
+    if(!selectedFile) return;
+    var base=serverBase();
+    if(!base){ statusText.textContent='Enter the server address above first.'; return; }
+    scanBtn.disabled=true;
+    statusText.textContent='Scanning…';
+    resultCard.classList.remove('show');
+
+    var form=new FormData();
+    form.append('file', selectedFile);
+
+    fetch(base+'/predict', { method:'POST', body:form })
+      .then(function(r){ if(!r.ok) throw new Error('Server error'); return r.json(); })
+      .then(function(data){
+        statusText.textContent='';
+        scanBtn.disabled=false;
+        showResult(data);
+      })
+      .catch(function(err){
+        statusText.textContent='Scan failed: '+err.message+'. Check the server address and that it is running.';
+        scanBtn.disabled=false;
+      });
+  });
+
+  function showResult(d){
+    var badge=document.getElementById('badge');
+    badge.className='badge '+d.severity;
+    badge.textContent = d.severity==='none' ? 'HEALTHY' : d.severity+' SEVERITY';
+    document.getElementById('labelName').textContent=d.label.replace(/_/g,' ');
+    document.getElementById('confNum').textContent=Math.round(d.confidence*100)+'%';
+    document.getElementById('confFill').style.width=(d.confidence*100)+'%';
+    document.getElementById('summary').textContent=d.summary;
+    document.getElementById('action').textContent=d.action;
+    var top3=document.getElementById('top3');
+    top3.innerHTML='';
+    d.top3.forEach(function(t){
+      var row=document.createElement('div');
+      row.className='row';
+      var pct=Math.round(t.confidence*100);
+      row.innerHTML='<div class="line"><b>'+t.label.replace(/_/g,' ')+'</b><span>'+pct+'%</span></div><div class="top3-track"><div class="top3-fill" style="width:'+pct+'%"></div></div>';
+      top3.appendChild(row);
+    });
+    resultCard.classList.add('show');
+  }
+
+  checkHealth();
+})();
+</script>
+</body>
+</html>
