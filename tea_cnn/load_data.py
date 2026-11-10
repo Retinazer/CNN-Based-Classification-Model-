@@ -9,8 +9,9 @@ Run this first: python3 load_data.py
 import json
 import os
 
-from datasets import concatenate_datasets, load_dataset
+from datasets import Dataset, Image as HFImage, concatenate_datasets, load_dataset
 from sklearn.model_selection import train_test_split
+from torchvision.datasets import ImageFolder
 
 from common import (
     CANONICAL_LABEL_MAP,
@@ -25,6 +26,29 @@ SOURCES = [
     "yunusserhat/tea_sickness_dataset",
     "Project-AgML/tea_leaf_disease_classification",
 ]
+
+KAGGLE_SOURCE_DIR = os.path.join(
+    DATA_CACHE_DIR,
+    "kaggle_tea_sickness_extracted/j32xdt2ff5-2/tea sickness dataset/tea sickness dataset",
+)
+KAGGLE_SOURCE_NAME = "mexwell/tea-sickness-dataset"
+
+
+def load_kaggle_folder(folder_path: str, repo_id: str):
+    """Load an ImageFolder-layout dataset (one subdir per class) and return
+    a Dataset with columns image / canon_label / source, matching the HF
+    sources' schema."""
+    folder = ImageFolder(folder_path)
+    raw_classes = folder.classes
+    print(f"\n=== {repo_id} ===")
+    print(f"  raw classes: {raw_classes}")
+
+    paths = [s[0] for s in folder.samples]
+    canon_labels = [canonicalize(raw_classes[s[1]].replace(" ", "_")) for s in folder.samples]
+    sources = [repo_id] * len(paths)
+
+    ds = Dataset.from_dict({"image": paths, "canon_label": canon_labels, "source": sources})
+    return ds.cast_column("image", HFImage())
 
 
 def load_and_normalize(repo_id: str):
@@ -65,6 +89,7 @@ def main():
         print(f"  {raw!r} -> {canon!r}")
 
     combined_parts = [load_and_normalize(repo_id) for repo_id in SOURCES]
+    combined_parts.append(load_kaggle_folder(KAGGLE_SOURCE_DIR, KAGGLE_SOURCE_NAME))
     combined = concatenate_datasets(combined_parts)
 
     canonical_classes = sorted(set(combined["canon_label"]))
