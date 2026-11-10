@@ -143,6 +143,31 @@ def _colorize(gray01: np.ndarray) -> np.ndarray:
     return (c0 + (c1 - c0) * frac).astype(np.uint8)
 
 
+def _leafiness(image: Image.Image) -> float:
+    """Fraction of pixels that look plant-like (green/olive/brown, not grey/white/black).
+
+    Cheap heuristic to catch "this isn't a leaf at all" before trusting the
+    disease classifier, which is a closed 9-class model with no reject option
+    and will confidently mislabel any non-leaf photo.
+    """
+    small = np.array(image.resize((96, 96)).convert("RGB"), dtype=np.float32) / 255.0
+    r, g, b = small[..., 0], small[..., 1], small[..., 2]
+    maxc, minc = small.max(axis=-1), small.min(axis=-1)
+    delta = maxc - minc
+    safe_delta = np.where(delta == 0, 1, delta)
+    rc = (maxc - r) / safe_delta
+    gc = (maxc - g) / safe_delta
+    bc = (maxc - b) / safe_delta
+    hue = np.select([maxc == r, maxc == g], [(bc - gc), 2.0 + rc - bc], default=4.0 + gc - rc)
+    hue = np.where(delta == 0, 0, (hue / 6.0) % 1.0)
+    sat = np.where(maxc == 0, 0, delta / np.where(maxc == 0, 1, maxc))
+    val = maxc
+
+    # green through olive/brown, roughly 25°-170° on the hue wheel
+    leafy = (hue >= 0.07) & (hue <= 0.47) & (sat >= 0.12) & (val >= 0.08) & (val <= 0.97)
+    return float(leafy.mean())
+
+
 def _region_label(cy: float, cx: float) -> str:
     """cy, cx in [0,1] -> a human-readable 3x3 grid location on the leaf."""
     row = "top" if cy < 1 / 3 else ("bottom" if cy > 2 / 3 else "middle")
@@ -221,6 +246,26 @@ async def predict(file: UploadFile = File(...)):
     best_label = top3[0]["label"]
     best_conf = top3[0]["confidence"]
     best_idx = int(top_idx[0].item())
+
+    # best_conf here is disease-class confidence, not "is this a leaf" confidence --
+    # a real leaf can legitimately be ambiguous between two diseases (e.g. 0.32),
+    # so only reject on near-random confidence (barely above the 1/9 baseline),
+    # and rely mainly on _leafiness for the actual "not a leaf" signal.
+    leaf_fraction = _leafiness(image)
+    if leaf_fraction < 0.03 or best_conf < 0.15:
+        return {
+            "is_tea_leaf": False,
+            "label": None,
+            "confidence": best_conf,
+            "top3": top3,
+            "severity": None,
+            "summary": "This doesn't look like a tea leaf.",
+            "action": "Point the camera at a single tea leaf, filling most of the frame, and try again.",
+            "heatmap": None,
+            "focus_region": None,
+            "focus_coverage": None,
+        }
+
     info = ADVICE.get(best_label, {"severity": "unknown", "summary": "", "action": "Consult a tea agronomist."})
 
     heatmap_uri, focus_region, coverage = None, None, None
@@ -230,6 +275,7 @@ async def predict(file: UploadFile = File(...)):
         print(f"Grad-CAM failed (continuing without it): {e}")
 
     return {
+        "is_tea_leaf": True,
         "label": best_label,
         "confidence": best_conf,
         "top3": top3,

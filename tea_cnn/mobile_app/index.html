@@ -485,19 +485,21 @@
         scanBtn.disabled=false;
         showResult(data);
 
-        var reader=new FileReader();
-        reader.onload=function(){
-          downscaleThumb(reader.result, function(thumb){
-            addLogEntry({
-              ts: Date.now(),
-              label: data.label,
-              confidence: data.confidence,
-              severity: data.severity,
-              thumb: thumb
+        if(data.is_tea_leaf){
+          var reader=new FileReader();
+          reader.onload=function(){
+            downscaleThumb(reader.result, function(thumb){
+              addLogEntry({
+                ts: Date.now(),
+                label: data.label,
+                confidence: data.confidence,
+                severity: data.severity,
+                thumb: thumb
+              });
             });
-          });
-        };
-        reader.readAsDataURL(selectedFile);
+          };
+          reader.readAsDataURL(selectedFile);
+        }
       })
       .catch(function(err){
         statusText.textContent='Scan failed: '+err.message+'. Check the server address in Profile and that it is running.';
@@ -507,6 +509,24 @@
 
   function showResult(d){
     var badge=document.getElementById('badge');
+    var top3Block=document.getElementById('top3').closest('.info-block');
+
+    if(!d.is_tea_leaf){
+      badge.className='badge high';
+      badge.textContent='Not a tea leaf';
+      document.getElementById('sevMark').className='sev-mark';
+      document.getElementById('labelName').textContent='No leaf detected';
+      document.getElementById('confNum').textContent=Math.round(d.confidence*100)+'% match to any class';
+      document.getElementById('confFill').style.width=(d.confidence*100)+'%';
+      document.getElementById('summary').textContent=d.summary;
+      document.getElementById('action').textContent=d.action;
+      document.getElementById('heatmapBlock').style.display='none';
+      if(top3Block) top3Block.style.display='none';
+      resultCard.classList.add('show');
+      return;
+    }
+    if(top3Block) top3Block.style.display='';
+
     badge.className='badge '+d.severity;
     badge.textContent = d.severity==='none' ? 'Healthy' : d.severity.charAt(0).toUpperCase()+d.severity.slice(1)+' severity';
     document.getElementById('sevMark').className='sev-mark '+d.severity;
